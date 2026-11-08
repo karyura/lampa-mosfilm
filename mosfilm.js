@@ -1,12 +1,12 @@
-/* Mosfilm menu prototype 0.3.0. Experimental RUTUBE iframe adapter. Device playback unverified; no direct media streams. */
+/* Mosfilm menu prototype 0.4.0. Experimental RUTUBE iframe adapter. Device playback unverified; no direct media streams. */
 (function (window) {
     'use strict';
-    if (window.__mosfilmMenuRutubeV03) return;
+    if (window.__mosfilmMenuRutubeV04) return;
     var state = {ready: false, attempts: 0};
-    window.__mosfilmMenuRutubeV03 = state;
+    window.__mosfilmMenuRutubeV04 = state;
     var films = [
-        {title: 'Деловые люди (1962)', id: 'b13ef664275a06c4dc6e46337cc52719'},
-        {title: 'Земля Санникова (1973)', id: '517a03c96cb712b66c3490e8c5460271'}
+        {title: 'Деловые люди (1962)', id: 'b13ef664275a06c4dc6e46337cc52719', poster: 'https://www.mosfilm.ru/upload/iblock/0c2/mxjngg4dd3fd50wntbvp6h9fp5e6gr1q/1e9cb99488fe283aceba63ba354cc7c5.jpg'},
+        {title: 'Земля Санникова (1973)', id: '517a03c96cb712b66c3490e8c5460271', poster: 'https://www.mosfilm.ru/upload/iblock/22a/zo4t9z6y7lsxliv4lxf0mvx3pd40avkg/1920x-_5_.webp'}
     ];
     // Documented RUTUBE embed bridge. No stream extraction, ad suppression or external navigation.
     function rutubeId(url) {
@@ -100,6 +100,44 @@
         return box;
     }
 
+    // Native Lampa row/cards preserve its directional controller and lazy image loading.
+    function homeRow() {
+        return {title: 'Мосфильм · RUTUBE · 4K по данным студии', mosfilmRow: true,
+            results: films.map(function(film){
+                return {id:'mosfilm_' + film.id, title:film.title, poster:film.poster,
+                    params:{emit:{
+                        onlyEnter:function(){
+                            var L=window.Lampa;
+                            var url='https://rutube.ru/video/' + film.id + '/';
+                            if (!L.PlayerVideo.verifyTube(url)) { L.Noty.show('Адаптер RUTUBE недоступен.'); return; }
+                            L.Player.callback(function(){L.Controller.toContent();});
+                            L.Player.play({url:url,title:film.title,launch_player:'inner'});
+                        },
+                        onlyLong:function(){window.Lampa.Noty.show('Официальная публикация Мосфильма. Фактические 2160p не проверены.');}
+                    }}}
+            })};
+    }
+    function installHomeRow() {
+        var L=window.Lampa;
+        if (!L.Api || typeof L.Api.main !== 'function' || !L.Controller.toContent) return false;
+        var original=L.Api.main;
+        if(original.mosfilmHomeRow) return true;
+        function main(params, done, fail) {
+            var added=false;
+            return original.call(this,params,function(rows){
+                if (!Array.isArray(rows)) return done.apply(this,arguments);
+                var next=rows.slice();
+                if (!added) {
+                    added=true;
+                    if (!next.some(function(row){return row && row.mosfilmRow;})) next.unshift(homeRow());
+                }
+                return done.call(this,next);
+            },fail);
+        }
+        main.mosfilmHomeRow=true;
+        L.Api.main=main;
+        return true;
+    }
     function showFilms() {
         var L = window.Lampa;
         L.Select.show({
@@ -131,16 +169,17 @@
             !$('.menu .menu__list').eq(0).length) {
             state.attempts += 1;
             if (state.attempts < 120) window.setTimeout(start, 500);
-            else delete window.__mosfilmMenuRutubeV03;
+            else delete window.__mosfilmMenuRutubeV04;
             return;
         }
         if (state.ready) return;
         if (!L.PlayerVideo || typeof L.PlayerVideo.registerTube !== 'function') {
             L.Noty.show('Для RUTUBE требуется Lampa с поддержкой адаптеров плеера.');
-            delete window.__mosfilmMenuRutubeV03; return;
+            delete window.__mosfilmMenuRutubeV04; return;
         }
         L.PlayerVideo.registerTube({name:'Mosfilm RUTUBE', verify:function(url){return !!rutubeId(url);}, create:createRutube});
-        var button = $('<li class="menu__item selector" data-mosfilm-menu="0.3.0">' +
+        state.homeRowInstalled=installHomeRow();
+        var button = $('<li class="menu__item selector" data-mosfilm-menu="0.4.0">' +
             '<div class="menu__ico"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg></div>' +
             '<div class="menu__text">Мосфильм</div></li>');
         button.on('hover:enter', showFilms);
