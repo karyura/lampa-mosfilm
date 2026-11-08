@@ -1,9 +1,9 @@
-/* Mosfilm menu prototype 0.8.0. Experimental RUTUBE iframe adapter. Device playback unverified; no direct media streams. */
+/* Mosfilm menu prototype 0.9.0. Experimental RUTUBE iframe adapter. Device playback unverified; no direct media streams. */
 (function (window) {
     'use strict';
-    if (window.__mosfilmMenuRutubeV08) return;
+    if (window.__mosfilmMenuRutubeV09) return;
     var state = {ready: false, attempts: 0};
-    window.__mosfilmMenuRutubeV08 = state;
+    window.__mosfilmMenuRutubeV09 = state;
     var films = [
     {
         "title": "Деловые люди (1962)",
@@ -818,6 +818,15 @@
             var panel=window.Lampa.PlayerPanel;
             if(panel && panel.render) panel.render().find('.player-panel__quality').text(text);
         }
+        function infoLabel(){
+            // Lampa's size badge otherwise stays "Loading": iframe does not expose decoded dimensions.
+            // Report the source/official rendition height, never fabricate videoWidth or videoHeight.
+            var info=window.Lampa.PlayerInfo;
+            if(info && typeof info.render==='function'){
+                var view=info.render();
+                if(view && typeof view.find==='function')view.find('.value--size span').text('RUTUBE'+(currentHeight?' · '+currentHeight+'p':''));
+            }
+        }
         function publishQuality(){
             var panel=window.Lampa.PlayerPanel;
             if(!panel || typeof panel.quality!=='function')return;
@@ -855,7 +864,7 @@
             if (!msg || typeof msg !== 'object') return;
             var data = msg.data || {};
             if (msg.type === 'player:ready') {
-                ready = true; window.clearTimeout(timer);
+                ready = true; window.clearTimeout(timer);infoLabel();
                 send('player:setVolume', {volume:volume});
                 send(muted?'player:mute':'player:unMute');
                 if (pendingSeek !== null) send('player:setCurrentTime', {time:pendingSeek});
@@ -864,7 +873,7 @@
                 watchStart();
             }
             if (msg.type === 'player:durationChange' && typeof data.duration === 'number' && isFinite(data.duration) && data.duration >= 0) {
-                duration = data.duration; emit('loadeddata');
+                duration = data.duration; emit('loadeddata');infoLabel();
             }
             if (msg.type === 'player:currentTime' && typeof data.time === 'number' && isFinite(data.time) && data.time >= 0) {
                 current = data.time; emit('timeupdate');
@@ -885,7 +894,7 @@
             if (msg.type === 'player:currentQuality' && data.quality && typeof data.quality.height === 'number' && isFinite(data.quality.height) && data.quality.height>0 && data.quality.height<=8640) {
                 currentHeight=data.quality.height;
                 automatic=data.quality.isAutoQuality === true;
-                video.rutubeCurrentQuality=currentHeight;
+                video.rutubeCurrentQuality=currentHeight;infoLabel();
                 qualityLabel((automatic?'Авто · ':'')+currentHeight+'p');
             }
             if (msg.type === 'player:qualityList' && Array.isArray(data.list)) {
@@ -944,7 +953,7 @@
         var scroll=new L.Scroll({mask:true,over:true});
         var html=$('<div class="mosfilm-details" style="padding:2em"></div>');
         var play=$('<div class="selector full-start__button" style="display:inline-block;padding:1em 2em;background:#333;margin:1em 0">Воспроизвести</div>');
-        var last=play, sourceOpen=false, sourceToken=0;
+        var last=play, playerOpen=false;
         if(film){
             var layout=$('<div style="display:flex;gap:2em;align-items:flex-start"></div>');
             if(film.poster){
@@ -963,22 +972,20 @@
             body.append($('<p style="opacity:.75"></p>').text('4K указано издателем. Доступные разрешения появятся после загрузки плеера.'));
             body.append(play);layout.append(body);html.append(layout);
             play.on('hover:enter',function(){
-                if(dead || sourceOpen)return;
-                sourceOpen=true;var token=++sourceToken;
-                L.Select.show({title:'Источник воспроизведения',items:[{title:'RUTUBE · Мосфильм',source:'mosfilm-rutube',subtitle:'Официальный встроенный плеер'}],
-                    onBack:function(){if(dead || token!==sourceToken)return;sourceOpen=false;sourceToken++;self.start();},
-                    onSelect:function(choice){
-                        if(dead || token!==sourceToken || !sourceOpen)return;
-                        sourceOpen=false;sourceToken++;
-                        if(!choice || choice.source!=='mosfilm-rutube'){self.start();return;}
-                        var url='https://rutube.ru/video/'+film.id+'/';
-                        if(!L.PlayerVideo || !L.PlayerVideo.verifyTube || !L.PlayerVideo.verifyTube(url)){
-                            L.Noty.show('Адаптер RUTUBE недоступен.');self.start();return;
-                        }
-                        L.Player.callback(function(){if(!dead)self.start();});
-                        L.Player.play({url:url,title:film.title,launch_player:'inner'});
-                    }
-                });
+                if(dead || playerOpen)return;
+                var url='https://rutube.ru/video/'+film.id+'/';
+                if(!L.PlayerVideo || !L.PlayerVideo.verifyTube || !L.PlayerVideo.verifyTube(url)){
+                    L.Noty.show('Адаптер RUTUBE недоступен.');self.start();return;
+                }
+                playerOpen=true;
+                try {
+                    L.Player.callback(function(){playerOpen=false;if(!dead)self.start();});
+                    L.Player.play({url:url,title:film.title,launch_player:'inner'});
+                } catch(error) {
+                    playerOpen=false;
+                    L.Noty.show('Не удалось открыть плеер RUTUBE. Попробуйте снова.');
+                    if(!dead)self.start();
+                }
             });
         } else {
             html.append($('<h2>Публикация не найдена</h2>'));
@@ -999,6 +1006,9 @@
     function MosfilmPage() {
         var L=window.Lampa, $=window.jQuery || window.$, self=this;
         var scroll=new L.Scroll({mask:true,over:true});
+        // A Scroll needs a viewport bounded by the screen, not the full grid height.
+        // minus() lets Lampa.Layer subtract its header/navigation on start and resize.
+        scroll.minus();
         var html=$('<div class="mosfilm-page" style="padding:1.5em"></div>');
         var cards=[], active=0, built=false, destroyed=false, query='';
         var search=$('<div class="selector" style="padding:.8em;margin-bottom:1em;background:#333">Поиск по каталогу</div>');
@@ -1055,9 +1065,12 @@
             if(!built){built=true;if(this.activity && this.activity.loader)this.activity.loader(false);}
             return this.render();
         };
-        this.render=function(){return scroll.render();};
+        this.render=function(js){return scroll.render(js);};
         this.start=function(){
             if(destroyed)return;
+            // Activity has attached our DOM by now. Size it before focus calls update().
+            L.Layer.update(scroll.render());
+            scroll.restorePosition();
             L.Controller.add('content',{
                 toggle:function(){L.Controller.collectionSet(html);focus(active);},
                 left:function(){if(active>0 && active%4!==0)focus(active-1);else L.Controller.toggle('menu');},
@@ -1067,6 +1080,11 @@
                 back:function(){L.Activity.backward();}
             });
             L.Controller.toggle('content');
+        };
+        this.resize=function(){
+            if(destroyed)return;
+            L.Layer.update(scroll.render());
+            scroll.update(active<0?search:(cards[active] || search));
         };
         this.pause=this.stop=function(){};
         this.destroy=function(){destroyed=true;cards.forEach(function(c){c.off();c.find('img').off();});scroll.destroy();html.remove();cards=[];search.off();};
@@ -1081,23 +1099,23 @@
         var L = window.Lampa;
         var $ = window.jQuery || window.$;
         if (!window.appready || !$ || !L || !L.Player || !L.Player.play || !L.Player.callback ||
-            !L.Select || !L.Select.show || !L.Component || !L.Component.add || !L.Activity || !L.Activity.push || !L.Scroll ||
+            !L.Component || !L.Component.add || !L.Activity || !L.Activity.push || !L.Scroll ||
             !L.Controller || !L.Controller.add || !L.Controller.collectionSet || !L.Controller.collectionFocus || !L.Controller.toggle || !L.Noty || !L.Noty.show ||
             !$('.menu .menu__list').eq(0).length) {
             state.attempts += 1;
             if (state.attempts < 120) window.setTimeout(start, 500);
-            else delete window.__mosfilmMenuRutubeV08;
+            else delete window.__mosfilmMenuRutubeV09;
             return;
         }
         if (state.ready) return;
-        var older=['__mosfilmMenuRutubeV03','__mosfilmMenuRutubeV04','__mosfilmMenuRutubeV05','__mosfilmMenuRutubeV06','__mosfilmMenuRutubeV07','__mosfilmMenuV02','__mosfilmOfficialLinks'];
+        var older=['__mosfilmMenuRutubeV03','__mosfilmMenuRutubeV04','__mosfilmMenuRutubeV05','__mosfilmMenuRutubeV06','__mosfilmMenuRutubeV07','__mosfilmMenuRutubeV08','__mosfilmMenuV02','__mosfilmOfficialLinks'];
         if(older.some(function(key){return window[key] && window[key].ready;}) || window.__mosfilmOfficialRuntime){
             L.Noty.show('Для обновления «Мосфильма» полностью перезапустите Lampa. Не добавляйте второй адрес плагина.');
-            delete window.__mosfilmMenuRutubeV08;return;
+            delete window.__mosfilmMenuRutubeV09;return;
         }
         if (!L.PlayerVideo || typeof L.PlayerVideo.registerTube !== 'function') {
             L.Noty.show('Для RUTUBE требуется Lampa с поддержкой адаптеров плеера.');
-            delete window.__mosfilmMenuRutubeV08; return;
+            delete window.__mosfilmMenuRutubeV09; return;
         }
         L.PlayerVideo.registerTube({name:'Mosfilm RUTUBE', verify:function(url){return !!rutubeId(url);}, create:createRutube});
         L.Component.add('mosfilm_rutube_page',MosfilmPage);
