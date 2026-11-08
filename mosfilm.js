@@ -1,9 +1,9 @@
-/* Mosfilm menu prototype 0.4.0. Experimental RUTUBE iframe adapter. Device playback unverified; no direct media streams. */
+/* Mosfilm menu prototype 0.5.0. Experimental RUTUBE iframe adapter. Device playback unverified; no direct media streams. */
 (function (window) {
     'use strict';
-    if (window.__mosfilmMenuRutubeV04) return;
+    if (window.__mosfilmMenuRutubeV05) return;
     var state = {ready: false, attempts: 0};
-    window.__mosfilmMenuRutubeV04 = state;
+    window.__mosfilmMenuRutubeV05 = state;
     var films = [
         {title: 'Деловые люди (1962)', id: 'b13ef664275a06c4dc6e46337cc52719', poster: 'https://www.mosfilm.ru/upload/iblock/0c2/mxjngg4dd3fd50wntbvp6h9fp5e6gr1q/1e9cb99488fe283aceba63ba354cc7c5.jpg'},
         {title: 'Земля Санникова (1973)', id: '517a03c96cb712b66c3490e8c5460271', poster: 'https://www.mosfilm.ru/upload/iblock/22a/zo4t9z6y7lsxliv4lxf0mvx3pd40avkg/1920x-_5_.webp'}
@@ -100,86 +100,88 @@
         return box;
     }
 
-    // Native Lampa row/cards preserve its directional controller and lazy image loading.
-    function homeRow() {
-        return {title: 'Мосфильм · RUTUBE · 4K по данным студии', mosfilmRow: true,
-            results: films.map(function(film){
-                return {id:'mosfilm_' + film.id, title:film.title, poster:film.poster,
-                    params:{emit:{
-                        onlyEnter:function(){
-                            var L=window.Lampa;
-                            var url='https://rutube.ru/video/' + film.id + '/';
-                            if (!L.PlayerVideo.verifyTube(url)) { L.Noty.show('Адаптер RUTUBE недоступен.'); return; }
-                            L.Player.callback(function(){L.Controller.toContent();});
-                            L.Player.play({url:url,title:film.title,launch_player:'inner'});
-                        },
-                        onlyLong:function(){window.Lampa.Noty.show('Официальная публикация Мосфильма. Фактические 2160p не проверены.');}
-                    }}}
-            })};
-    }
-    function installHomeRow() {
-        var L=window.Lampa;
-        if (!L.Api || typeof L.Api.main !== 'function' || !L.Controller.toContent) return false;
-        var original=L.Api.main;
-        if(original.mosfilmHomeRow) return true;
-        function main(params, done, fail) {
-            var added=false;
-            return original.call(this,params,function(rows){
-                if (!Array.isArray(rows)) return done.apply(this,arguments);
-                var next=rows.slice();
-                if (!added) {
-                    added=true;
-                    if (!next.some(function(row){return row && row.mosfilmRow;})) next.unshift(homeRow());
-                }
-                return done.call(this,next);
-            },fail);
+    function MosfilmPage() {
+        var L=window.Lampa, $=window.jQuery || window.$, self=this;
+        var scroll=new L.Scroll({mask:true,over:true});
+        var html=$('<div class="mosfilm-page" style="padding:1.5em"></div>');
+        var cards=[], active=0, built=false, destroyed=false;
+        var grid=$('<div style="display:flex;gap:2em;align-items:flex-start"></div>');
+        html.append($('<h2 style="margin:0 0 1em">Мосфильм</h2>'));
+        html.append($('<div style="margin-bottom:1.5em;opacity:.75">Официальные фильмы RUTUBE. Фактические 2160p не проверены.</div>'));
+        html.append(grid); scroll.append(html);
+        function focus(index) {
+            active=Math.max(0,Math.min(cards.length-1,index));
+            L.Controller.collectionFocus(cards[active],html);
         }
-        main.mosfilmHomeRow=true;
-        L.Api.main=main;
-        return true;
-    }
-    function showFilms() {
-        var L = window.Lampa;
-        L.Select.show({
-            title: 'Мосфильм · 2 фильма · пробная версия',
-            items: films.map(function (film, index) {
-                return {title: film.title, index: index,
-                    subtitle: 'Официальный RUTUBE · 4K в названии публикации. Фактические 2160p не проверены.'};
-            }),
-            onBack: function () { L.Controller.toggle('menu'); },
-            onSelect: function (item) {
-                var film = item && typeof item.index === 'number' && films[item.index];
-                if (!film) { L.Controller.toggle('menu'); return; }
-                var url = 'https://rutube.ru/video/' + film.id + '/' ;
-                if (!L.PlayerVideo || typeof L.PlayerVideo.verifyTube !== 'function' || !L.PlayerVideo.verifyTube(url)) {
-                    L.Noty.show('Эта версия Lampa не поддерживает адаптер RUTUBE. Переход на сайт отключён.');
-                    L.Controller.toggle('menu');
-                    return;
-                }
-                L.Player.callback(showFilms);
-                L.Player.play({url: url, title: film.title, launch_player: 'inner'});
-            }
+        films.forEach(function(film,index){
+            var card=$('<div class="selector card" style="width:12em;flex:0 0 12em"></div>');
+            var image=$('<img style="display:block;width:100%;height:18em;object-fit:contain;background:#222;border-radius:.4em" />');
+            image.attr('src',film.poster).attr('alt',film.title);
+            image.on('error',function(){image.hide();card.find('.mosfilm-image-error').show();});
+            card.append(image);
+            card.append($('<div class="mosfilm-image-error" style="display:none;height:18em;background:#222;padding:1em">Постер недоступен. Фильм можно открыть.</div>'));
+            card.append($('<div style="margin-top:.6em"></div>').text(film.title));
+            card.on('hover:focus',function(){
+                active=index;
+                cards.forEach(function(other){other.css('outline','none');});
+                card.css('outline','0.2em solid #fff').css('outline-offset','0.4em');
+                scroll.update(card);
+            });
+            card.on('hover:enter',function(){
+                var url='https://rutube.ru/video/' + film.id + '/';
+                if(!L.PlayerVideo.verifyTube(url)){L.Noty.show('Адаптер RUTUBE недоступен.');return;}
+                active=index;
+                L.Player.callback(function(){if(!destroyed) self.start();});
+                L.Player.play({url:url,title:film.title,launch_player:'inner'});
+            });
+            cards.push(card);grid.append(card);
         });
+        this.create=function(){
+            if(!built){built=true;if(this.activity && this.activity.loader)this.activity.loader(false);}
+            return this.render();
+        };
+        this.render=function(){return scroll.render();};
+        this.start=function(){
+            if(destroyed)return;
+            L.Controller.add('content',{
+                toggle:function(){L.Controller.collectionSet(html);focus(active);},
+                left:function(){if(active>0)focus(active-1);else L.Controller.toggle('menu');},
+                right:function(){if(active<cards.length-1)focus(active+1);},
+                up:function(){L.Controller.toggle('head');},
+                down:function(){},
+                back:function(){L.Activity.backward();}
+            });
+            L.Controller.toggle('content');
+        };
+        this.pause=this.stop=function(){};
+        this.destroy=function(){destroyed=true;cards.forEach(function(c){c.off();c.find('img').off();});scroll.destroy();html.remove();cards=[];};
+    }
+    function showFilms(){
+        var L=window.Lampa;
+        var current=L.Activity.active && L.Activity.active();
+        if(current && current.component==='mosfilm_rutube_page') {L.Controller.toContent();return;}
+        L.Activity.push({url:'',title:'Мосфильм',component:'mosfilm_rutube_page',page:1});
     }
     function start() {
         var L = window.Lampa;
         var $ = window.jQuery || window.$;
         if (!window.appready || !$ || !L || !L.Player || !L.Player.play || !L.Player.callback ||
-            !L.Select || !L.Select.show || !L.Controller || !L.Controller.toggle || !L.Noty || !L.Noty.show ||
+            !L.Component || !L.Component.add || !L.Activity || !L.Activity.push || !L.Scroll ||
+            !L.Controller || !L.Controller.add || !L.Controller.collectionSet || !L.Controller.collectionFocus || !L.Controller.toggle || !L.Noty || !L.Noty.show ||
             !$('.menu .menu__list').eq(0).length) {
             state.attempts += 1;
             if (state.attempts < 120) window.setTimeout(start, 500);
-            else delete window.__mosfilmMenuRutubeV04;
+            else delete window.__mosfilmMenuRutubeV05;
             return;
         }
         if (state.ready) return;
         if (!L.PlayerVideo || typeof L.PlayerVideo.registerTube !== 'function') {
             L.Noty.show('Для RUTUBE требуется Lampa с поддержкой адаптеров плеера.');
-            delete window.__mosfilmMenuRutubeV04; return;
+            delete window.__mosfilmMenuRutubeV05; return;
         }
         L.PlayerVideo.registerTube({name:'Mosfilm RUTUBE', verify:function(url){return !!rutubeId(url);}, create:createRutube});
-        state.homeRowInstalled=installHomeRow();
-        var button = $('<li class="menu__item selector" data-mosfilm-menu="0.4.0">' +
+        L.Component.add('mosfilm_rutube_page',MosfilmPage);
+        var button = $('<li class="menu__item selector" data-mosfilm-menu="0.5.0">' +
             '<div class="menu__ico"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg></div>' +
             '<div class="menu__text">Мосфильм</div></li>');
         button.on('hover:enter', showFilms);
